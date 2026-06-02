@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Smart Pet Feeding System</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="backdrop"></div>
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-mark">PF</span>
+      <div>
+        <p>Project Demo</p>
+        <h1>Smart Pet Feeder</h1>
+      </div>
+    </div>
+    <nav class="nav-links" aria-label="Primary">
+      <a href="#overview">Overview</a>
+      <a href="#use-cases">Use Cases</a>
+      <a href="#dashboard">Dashboard</a>
+    </nav>
+  </header>
+
+  <main>
+    <section class="hero" id="overview">
+      <div class="hero-copy reveal">
+        <span class="eyebrow">IoT-enabled home automation</span>
+        <h2>Interactive feeding that adapts to your pet’s routine and bowl status.</h2>
+        <p>
+          This webpage presents a smart pet feeding system that combines automation,
+          sensing, and remote control across a feeder unit and a monitoring unit.
+          The design emphasizes scheduled feeding, remote feeding, and smart monitoring
+          with overfeeding prevention built in.
+        </p>
+        <div class="hero-actions">
+          <a class="button primary" href="#dashboard">Open Demo Panel</a>
+          <a class="button secondary" href="#use-cases">View Use Cases</a>
+        </div>
+        <div class="hero-metrics">
+          <article>
+            <strong>2</strong>
+            <span>WiFi microcontrollers</span>
+          </article>
+          <article>
+            <strong>3</strong>
+            <span>Core use cases</span>
+          </article>
+          <article>
+            <strong>1</strong>
+            <span>Goal: healthy feeding</span>
+          </article>
+        </div>
+      </div>
+
+      <aside class="hero-panel reveal" aria-label="System summary">
+        <div class="panel-card">
+          <p class="panel-label">System status</p>
+          <h3 id="systemStatus">Ready for feeding</h3>
+          <div class="status-row">
+            <span class="status-dot on"></span>
+            <span>Feeder unit connected</span>
+          </div>
+          <div class="status-row">
+            <span class="status-dot on"></span>
+            <span>Monitoring unit active</span>
+          </div>
+          <div class="status-row">
+            <span class="status-dot warn"></span>
+            <span>Bowl level checked before action</span>
+          </div>
+        </div>
+        <div class="panel-card signal">
+          <p class="panel-label">Detected sensors</p>
+          <ul>
+            <li>Servo motor for dispensing food</li>
+            <li>Load cell for bowl weight</li>
+            <li>Ultrasonic or motion sensor for presence detection</li>
+            <li>Web interface or physical button input</li>
+          </ul>
+        </div>
+      </aside>
+    </section>
+
+    <section class="section-grid" id="use-cases">
+      <article class="feature-card reveal">
+        <p class="card-tag">Use Case 1</p>
+        <h3>Scheduled Feeding</h3>
+        <p>The system dispenses food automatically at set times and checks bowl weight before dispensing.</p>
+        <div class="mini-list">
+          <span>Timed automation</span>
+          <span>Pre-check bowl status</span>
+        </div>
+      </article>
+      <article class="feature-card reveal">
+        <p class="card-tag">Use Case 2</p>
+        <h3>Remote Feeding</h3>
+        <p>User can feed the pet from a mobile device, while the system verifies the food level before action.</p>
+        <div class="mini-list">
+          <span>Mobile control</span>
+          <span>Safe dispensing</span>
+        </div>
+      </article>
+      <article class="feature-card reveal">
+        <p class="card-tag">Use Case 3</p>
+        <h3>Smart Monitoring</h3>
+        <p>The monitoring unit detects if the pet hasn’t eaten and can send an alert or notification.</p>
+        <div class="mini-list">
+          <span>Pet presence detection</span>
+          <span>Alert generation</span>
+        </div>
+      </article>
+    </section>
+
+    <section class="dashboard" id="dashboard">
+      <div class="dashboard-header reveal">
+        <div>
+          <p class="eyebrow">Interactive demo panel</p>
+          <h2>Monitor bowl status and trigger a feeding cycle.</h2>
+        </div>
+        <p class="dashboard-note">This is a front-end prototype, so the numbers and alerts are simulated for presentation.</p>
+      </div>
+
+      <div class="dashboard-grid">
+        <div class="meter-card reveal">
+          <div class="meter-head">
+            <p class="panel-label">Bowl level</p>
+            <strong id="bowlPercent">68%</strong>
+          </div>
+          <div class="meter-track" aria-hidden="true">
+            <div class="meter-fill" id="bowlFill"></div>
+          </div>
+          <p class="meter-caption" id="bowlCaption">Enough food available for the next scheduled feed.</p>
+        </div>
+
+        <div class="controls-card reveal">
+          <p class="panel-label">Control center</p>
+          <div class="button-stack">
+            <button type="button" class="control-button" id="scheduleFeed">Run scheduled feed check</button>
+            <button type="button" class="control-button" id="remoteFeed">Remote feed from mobile</button>
+            <button type="button" class="control-button ghost" id="togglePresence">Toggle pet presence</button>
+          </div>
+          <p class="control-help">Feeding is only allowed when bowl capacity supports it. Presence detection can trigger alerts when the pet is not eating.</p>
+        </div>
+
+        <div class="log-card reveal">
+          <p class="panel-label">Live log</p>
+          <ul id="activityLog" class="activity-log" aria-live="polite"></ul>
+        </div>
+      </div>
+    </section>
+
+    <section class="workflow reveal">
+      <div>
+        <p class="eyebrow">How it works</p>
+        <h2>Two units, one coordinated feeding workflow.</h2>
+      </div>
+      <div class="workflow-steps">
+        <article>
+          <span>01</span>
+          <h3>Monitor</h3>
+          <p>The monitoring unit checks whether the pet is nearby and whether food consumption is happening.</p>
+        </article>
+        <article>
+          <span>02</span>
+          <h3>Verify</h3>
+          <p>The feeder unit checks bowl weight before dispensing to prevent overfeeding.</p>
+        </article>
+        <article>
+          <span>03</span>
+          <h3>Dispense</h3>
+          <p>The servo motor releases a controlled portion when the system confirms it is safe.</p>
+        </article>
+        <article>
+          <span>04</span>
+          <h3>Notify</h3>
+          <p>If the pet has not eaten, the system can generate a visible alert for the owner.</p>
+        </article>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+  </footer>
+
+  <script src="script.js"></script>
+</body>
+</html>

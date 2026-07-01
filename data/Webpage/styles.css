@@ -323,6 +323,7 @@ main,
   height: 0.7rem;
   border-radius: 50%;
   display: inline-block;
+  background: rgba(255, 255, 255, 0.2);
 }
 
 .status-dot.on {

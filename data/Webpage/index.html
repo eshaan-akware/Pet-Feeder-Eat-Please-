@@ -20,6 +20,8 @@
       <a href="#overview">Overview</a>
       <a href="#use-cases">Use Cases</a>
       <a href="#dashboard">Dashboard</a>
+      <a href="#analytics">User Analytics</a>
+      <a href="#how-it-works">How It Works</a>
     </nav>
   </header>
 
@@ -122,6 +124,29 @@
         <p class="dashboard-note">This is a front-end prototype, so the numbers and alerts are simulated for presentation.</p>
       </div>
 
+      <section class="stats-strip reveal" aria-label="Quick stats">
+        <article class="stat-card">
+          <p>Today's meals served</p>
+          <strong id="mealsTodayStat">0</strong>
+          <span>Completed in this session</span>
+        </article>
+        <article class="stat-card">
+          <p>Next feed time</p>
+          <strong id="nextFeedStat">Not set</strong>
+          <span>Saved by the user</span>
+        </article>
+        <article class="stat-card">
+          <p>Last feeding time</p>
+          <strong id="lastFeedStat">Not recorded yet</strong>
+          <span>Updates after each feeding cycle</span>
+        </article>
+        <article class="stat-card">
+          <p>Overfeed prevention</p>
+          <strong id="overfeedStat">Active</strong>
+          <span id="overfeedSub">90% bowl limit</span>
+        </article>
+      </section>
+
       <div class="dashboard-grid">
         <div class="meter-card reveal">
           <div class="meter-head">
@@ -136,12 +161,17 @@
 
         <div class="controls-card reveal">
           <p class="panel-label">Control center</p>
+          <div class="time-field">
+            <label for="feedTime">Scheduled feed time</label>
+            <input id="feedTime" type="text" inputmode="numeric" placeholder="6:30" aria-describedby="feedTimeHelp" />
+            <p id="feedTimeHelp">Enter a time like 6:30 or 18:30.</p>
+          </div>
           <div class="button-stack">
-            <button type="button" class="control-button" id="scheduleFeed">Run scheduled feed check</button>
+            <button type="button" class="control-button" id="scheduleFeed">Save scheduled time</button>
             <button type="button" class="control-button" id="remoteFeed">Remote feed from mobile</button>
             <button type="button" class="control-button ghost" id="togglePresence">Toggle pet presence</button>
           </div>
-          <p class="control-help">Feeding is only allowed when bowl capacity supports it. Presence detection can trigger alerts when the pet is not eating.</p>
+          <p class="control-help">The entered time is saved first. Automatic dispensing can be handled later by the hardware logic.</p>
         </div>
 
         <div class="log-card reveal">
@@ -149,9 +179,65 @@
           <ul id="activityLog" class="activity-log" aria-live="polite"></ul>
         </div>
       </div>
+
+      <section class="analytics reveal" id="analytics" aria-label="Analytics dashboard">
+        <div class="analytics-header">
+          <div>
+            <p class="eyebrow">User analytics</p>
+            <h2>Feeding history, bowl trend, pet activity, and balance comparison.</h2>
+          </div>
+          <p class="dashboard-note">Recommended view: feeding history first, then bowl and activity trends for the clearest presentation.</p>
+        </div>
+
+        <div class="analytics-grid">
+          <article class="chart-card chart-wide">
+            <div class="chart-head">
+              <div>
+                <p class="panel-label">Chart 1</p>
+                <h3>Feeding history</h3>
+              </div>
+              <span>Meals completed over time</span>
+            </div>
+            <canvas id="feedingHistoryChart" class="chart-canvas" aria-label="Feeding history chart"></canvas>
+          </article>
+
+          <article class="chart-card">
+            <div class="chart-head">
+              <div>
+                <p class="panel-label">Chart 2</p>
+                <h3>Bowl level trend</h3>
+              </div>
+              <span>Food level snapshots</span>
+            </div>
+            <canvas id="bowlTrendChart" class="chart-canvas" aria-label="Bowl trend chart"></canvas>
+          </article>
+
+          <article class="chart-card">
+            <div class="chart-head">
+              <div>
+                <p class="panel-label">Chart 3</p>
+                <h3>Pet activity</h3>
+              </div>
+              <span>Presence detected timeline</span>
+            </div>
+            <canvas id="petActivityChart" class="chart-canvas" aria-label="Pet activity chart"></canvas>
+          </article>
+
+          <article class="chart-card">
+            <div class="chart-head">
+              <div>
+                <p class="panel-label">Chart 4</p>
+                <h3>Feeding vs remaining food</h3>
+              </div>
+              <span>Balance of dispensed and remaining food</span>
+            </div>
+            <canvas id="balanceChart" class="chart-canvas" aria-label="Feeding versus remaining food chart"></canvas>
+          </article>
+        </div>
+      </section>
     </section>
 
-    <section class="workflow reveal">
+    <section class="workflow reveal" id="how-it-works">
       <div>
         <p class="eyebrow">How it works</p>
         <h2>Two units, one coordinated feeding workflow.</h2>

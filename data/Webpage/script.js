@@ -16,8 +16,7 @@ const feedingHistoryChart = document.getElementById("feedingHistoryChart");
 const bowlTrendChart = document.getElementById("bowlTrendChart");
 const petActivityChart = document.getElementById("petActivityChart");
 const balanceChart = document.getElementById("balanceChart");
-const firebaseURL = "https://console.firebase.google.com/u/0/project/pet-feeder-eat-please/database/pet-feeder-eat-please-default-rtdb/data/~2F?fb_gclid=Cj0KCQjw9ZLSBhCcARIsAEhGKgNGb4qAs8C0VDl8tGQCPvY8zrfRX9wrFFUX2GLQAg_0Gj6AvUJcGfEaAiKgEALw_wcB";
-
+const firebaseURL = "https://pet-feeder-eat-please-default-rtdb.europe-west1.firebasedatabase.app/feeder.json";
 const storedScheduleKey = "smartPetFeeder.scheduleTime";
 const dashboardStateKey = "smartPetFeeder.dashboardState";
 const chartLabels = ["D-6", "D-5", "D-4", "D-3", "D-2", "D-1", "Today"];
@@ -415,32 +414,33 @@ remoteFeed.addEventListener("click", () => {
 });
 
 togglePresence.addEventListener("click", () => {
-  fetch("/togglePresence")
+  fetch(firebaseURL, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ pet_present: petPresent }) 
+  })
   .then(response => {
     if (!response.ok)
-      throw new Error("Hardware refused connection.");
-      return response.text();    
-    })
-    .then(presence => {
-      // Convert the string response to a real JavaScript boolean
-      petPresent = (presence.trim() === 'true');
-      
-      if (petPresent) {
-        addLog("Monitoring unit detected the pet near the feeder.");
-        systemStatus.textContent = statusCopy.ready;
-      } else {
-      addLog("No pet detected. Alert can be sent to the user.");
+      throw new Error("cloud database refused connection.");
+    if (petPresent) {
+      addLog("Cloud simulated: Monitoring unit detected the pet.");
+      systemStatus.textContent = statusCopy.ready;
+    } else {
+      addLog("Cloud simulated: No pet detected.");
       systemStatus.textContent = "Pet not detected";
-      }
-      dashboardState.petActivity.push(petPresent ? 1 : 0);
-      dashboardState.petActivity = dashboardState.petActivity.slice(-7);
-      syncDashboard();
-    } 
-    )
+    }
+    
+    // Log the activity to your charts
+    dashboardState.petActivity.push(petPresent ? 1 : 0);
+    dashboardState.petActivity = dashboardState.petActivity.slice(-7);
+    syncDashboard();   
+    })
     .catch(error => {
-      addLog(`[ERROR] ${error.message}`);
-      systemStatus.textContent = statusCopy.blocked;
-    });
+    addLog(`[ERROR] ${error.message}`);
+    systemStatus.textContent = statusCopy.blocked;
+    // Revert the variable if the cloud update failed
+    petPresent = !petPresent;
+  });
 });
 
 function syncSystemStatus() {
@@ -448,23 +448,27 @@ function syncSystemStatus() {
   const monitorDot = document.getElementById("monitorDot");
 
   // Hit the cloud root to see if the database is responsive
-  fetch(FIREBASE_URL)
+  fetch(firebaseURL)
   .then(response => {
     if (!response.ok) throw new Error("Database unresponsive");
     return response.json();
   })
   .then(data => {
     // Turn on the green indicators
-    if (feederDot) feederDot.classList.add("on");
-    if (monitorDot) monitorDot.classList.add("on");
-    
-   
+   if (data && data.feeder_online === true) {
+      // 🟢 HARDWARE CONNECTED
+      if (feederDot) feederDot.classList.add("on");
+      if (monitorDot) monitorDot.classList.add("on");
+  } else {
+      // 🔴 HARDWARE OFFLINE (Even if Firebase is reachable)
+      if (feederDot) feederDot.classList.remove("on");
+      if (monitorDot) monitorDot.classList.remove("on");
+    }
   })
   .catch(error => {
-    // Strip the green indicators
+    // 🔴 NO INTERNET / FIREBASE DOWN
     if (feederDot) feederDot.classList.remove("on");
     if (monitorDot) monitorDot.classList.remove("on");
-    systemStatus.textContent = "System Offline";
     console.log(`[STATUS CHECK ERROR] ${error.message}`);
   });
 }

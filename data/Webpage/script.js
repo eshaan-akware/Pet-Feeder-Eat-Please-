@@ -16,6 +16,7 @@ const feedingHistoryChart = document.getElementById("feedingHistoryChart");
 const bowlTrendChart = document.getElementById("bowlTrendChart");
 const petActivityChart = document.getElementById("petActivityChart");
 const balanceChart = document.getElementById("balanceChart");
+const firebaseURL = "https://console.firebase.google.com/u/0/project/pet-feeder-eat-please/database/pet-feeder-eat-please-default-rtdb/data/~2F?fb_gclid=Cj0KCQjw9ZLSBhCcARIsAEhGKgNGb4qAs8C0VDl8tGQCPvY8zrfRX9wrFFUX2GLQAg_0Gj6AvUJcGfEaAiKgEALw_wcB";
 
 const storedScheduleKey = "smartPetFeeder.scheduleTime";
 const dashboardStateKey = "smartPetFeeder.dashboardState";
@@ -323,10 +324,10 @@ function loadStoredScheduleTime() {
 }
 
 function initializeBowl(){
-  fetch("/initialBowlLevel")
+  fetch(firebaseURL)
   .then(response => {
     if (!response.ok)
-      throw new Error("Hardware refused connection.");    
+      throw new Error("cloud database refused connection.");    
     return response.text();
   })
   .then(level => {
@@ -395,10 +396,22 @@ remoteFeed.addEventListener("click", () => {
     return;
   }
 
-  const portion = petPresent ? 14 : 10;
-  addLog(`Remote feed approved. Servo dispensed ${portion}% portion.`);
-  systemStatus.textContent = statusCopy.safe;
-  recordSuccessfulFeed(portion);
+  fetch(firebaseURL, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ feed_command: 1 }) // 1 means "dispense now"
+  })
+  .then(response => {
+    if (!response.ok) throw new Error("Failed to send command to cloud.");
+    const portion = petPresent ? 14 : 10;
+    addLog(`Command sent to cloud. Expecting ${portion}% portion dispense.`);
+    systemStatus.textContent = "Command Sent";
+    recordSuccessfulFeed(portion);
+  })
+  .catch(error => {
+    addLog(`[ERROR] ${error.message}`);
+    systemStatus.textContent = "Cloud Error";
+  });
 });
 
 togglePresence.addEventListener("click", () => {
@@ -430,6 +443,31 @@ togglePresence.addEventListener("click", () => {
     });
 });
 
+function syncSystemStatus() {
+  const feederDot = document.getElementById("feederDot");
+  const monitorDot = document.getElementById("monitorDot");
+
+  // Hit the cloud root to see if the database is responsive
+  fetch(FIREBASE_URL)
+  .then(response => {
+    if (!response.ok) throw new Error("Database unresponsive");
+    return response.json();
+  })
+  .then(data => {
+    // Turn on the green indicators
+    if (feederDot) feederDot.classList.add("on");
+    if (monitorDot) monitorDot.classList.add("on");
+    
+   
+  })
+  .catch(error => {
+    // Strip the green indicators
+    if (feederDot) feederDot.classList.remove("on");
+    if (monitorDot) monitorDot.classList.remove("on");
+    systemStatus.textContent = "System Offline";
+    console.log(`[STATUS CHECK ERROR] ${error.message}`);
+  });
+}
 addLog("System online. Feeder unit and monitoring unit are connected.");
 addLog("Initial bowl check completed before dispensing.");
 dashboardState = loadDashboardState();
@@ -440,4 +478,6 @@ setStatsFromState();
 renderAnalytics();
 window.addEventListener("resize", () => renderAnalytics());
 
+syncSystemStatus();
 initializeBowl();
+setInterval(syncSystemStatus, 30000); // Check system status every 30 seconds

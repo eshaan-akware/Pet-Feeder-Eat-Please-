@@ -36,7 +36,7 @@ void handleScheduleAction() {
     else {
         server.send(500, "text/plain", "Schedule action failed!");    
     }
-  server.send(200, "text/plain", "Schedule action received!");
+  //server.send(200, "text/plain", "Schedule action received!");
 }
 
 void handlePetPresenceToggle() {

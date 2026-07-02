@@ -47,6 +47,7 @@ let scheduledTimes = [];
 let currentStorageGrams= 0;
 let maxStorageGrams = 2000;
 let dispenseAmount = 200;
+let maxBowlGrams = 500;
 
 const statusCopy = {
   ready: "Ready for feeding",
@@ -360,7 +361,8 @@ function recordSuccessfulFeed(portion) {
     body: JSON.stringify({ storage_grams: currentStorageGrams })
   });
   
-  updateBowl(bowlLevel + portion, true);
+  const percentIncrease = Math.round((portion / maxBowlGrams) * 100);
+  updateBowl(bowlLevel + percentIncrease, true);
   addLog(`Feeding recorded. ${portion}% portion logged for the dashboard.`);
 }
 
@@ -662,6 +664,16 @@ function syncSystemStatus() {
       monitorDot.classList.add("danger");
     }
 
+    // Sync the Live Bowl Level from the hardware
+    if (data && data.bowl_level !== undefined) {
+      const liveBowlLevel = parseInt(data.bowl_level, 10);
+      
+      // Only update if the value actually changed to prevent unnecessary chart redraws
+      if (!Number.isNaN(liveBowlLevel) && liveBowlLevel !== bowlLevel) {
+        updateBowl(liveBowlLevel, false);
+      }
+    }
+    
     //Checking storage updates
     if (data && data.storage_grams !== undefined) {
       const liveWeight = parseInt(data.storage_grams, 10);
@@ -681,7 +693,7 @@ function syncSystemStatus() {
     if (data && data.dispense_amount !== undefined) {
       dispenseAmount = parseInt(data.dispense_amount, 10);
     }
-    
+
     // 2. THE BACKGROUND HANDSHAKE: Detect completion
     const completedFeed = scheduledTimes.find(s => s.status === "SUCCESS");
 

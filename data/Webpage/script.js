@@ -18,8 +18,20 @@ const petActivityChart = document.getElementById("petActivityChart");
 const balanceChart = document.getElementById("balanceChart");
 const firebaseURL = "https://pet-feeder-eat-please-default-rtdb.europe-west1.firebasedatabase.app/feeder.json";
 const storedScheduleKey = "smartPetFeeder.scheduleTime";
-const dashboardStateKey = "smartPetFeeder.dashboardState";
-const chartLabels = ["D-6", "D-5", "D-4", "D-3", "D-2", "D-1", "Today"];
+const dashboardStateKey = "smartPetFeeder.dashboardState";// Automatically generate the last 6 days + "Today" for the charts
+function getDynamicChartLabels() {
+  const labels = [];
+  for (let i = 6; i > 0; i--) {
+    const d = new Date();
+    d.setDate(d.getDate() - i);
+    // Formats the date cleanly, e.g., "Jun 28", "Jul 1"
+    labels.push(d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }));
+  }
+  labels.push("Today");
+  return labels;
+}
+
+const chartLabels = getDynamicChartLabels();
 const defaultDashboardState = {
   mealsToday: 0,
   lastFeedingTime: "Not recorded yet",
@@ -31,6 +43,10 @@ const defaultDashboardState = {
 let bowlLevel = 68;
 let petPresent = true;
 let dashboardState = loadDashboardState();
+let scheduledTimes = [];
+let currentStorageGrams= 0;
+let maxStorageGrams = 2000;
+let dispenseAmount = 200;
 
 const statusCopy = {
   ready: "Ready for feeding",
@@ -94,18 +110,25 @@ function getStoredDashboardState() {
 }
 
 function saveDashboardState() {
+  // Package all the chart arrays (including Chart 1: feedingHistory)
   const payload = {
-    ...dashboardState,
+    mealsToday: dashboardState.mealsToday,
+    lastFeedingTime: dashboardState.lastFeedingTime,
     feedingHistory: dashboardState.feedingHistory.slice(-7),
     bowlHistory: dashboardState.bowlHistory.slice(-7),
     petActivity: dashboardState.petActivity.slice(-7)
   };
 
-  try {
-    localStorage.setItem(dashboardStateKey, JSON.stringify(payload));
-  } catch {
-    // Ignore storage errors in demo mode.
-  }
+  // Push the payload to Firebase seamlessly in the background
+  fetch(firebaseURL, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ dashboard_state: payload })
+  })
+  .then(response => {
+    if (!response.ok) console.error("Failed to save analytics to cloud.");
+  })
+  .catch(error => console.error("Analytics sync error:", error));
 }
 
 function loadDashboardState() {
@@ -253,10 +276,8 @@ function drawLineChart(canvas, values, labels, lineColor, fillColor) {
   });
 }
 
-function drawComparisonChart(canvas, dispensedValue, remainingValue) {
-  if (!canvas) {
-    return;
-  }
+function drawComparisonChart(canvas, dispensedValue, remainingValue, maxValue) {
+  if (!canvas) return;
 
   const { context, width, height } = prepareCanvas(canvas);
   const padding = 28;
@@ -270,10 +291,16 @@ function drawComparisonChart(canvas, dispensedValue, remainingValue) {
   context.clearRect(0, 0, width, height);
   drawGrid(context, width, height);
 
+  // Prevent division by zero if the hopper is entirely empty
+  const safeMaxValue = Math.max(maxValue, 1);
+
   bars.forEach((bar, index) => {
     const x = padding + index * (barWidth + 22);
-    const barHeight = (Math.max(bar.value, 1) / 100) * (chartHeight - 14);
+    
+    // Calculate height relative to the dynamic peak storage
+    const barHeight = (Math.max(bar.value, 0) / safeMaxValue) * (chartHeight - 14);
     const y = height - padding - barHeight;
+    
     const gradient = context.createLinearGradient(x, y, x, y + barHeight);
     gradient.addColorStop(0, bar.colorStart);
     gradient.addColorStop(1, bar.colorEnd);
@@ -284,7 +311,9 @@ function drawComparisonChart(canvas, dispensedValue, remainingValue) {
     context.fillStyle = "rgba(238, 246, 251, 0.9)";
     context.font = "13px Segoe UI, Arial, sans-serif";
     context.textAlign = "center";
-    context.fillText(String(bar.value), x + barWidth / 2, y - 6);
+    
+    // Append 'g' for grams to the label
+    context.fillText(`${bar.value}g`, x + barWidth / 2, y - 6);
     context.fillText(bar.label, x + barWidth / 2, height - 8);
   });
 }
@@ -293,7 +322,10 @@ function renderAnalytics() {
   drawBarChart(feedingHistoryChart, dashboardState.feedingHistory, chartLabels, "rgba(86, 208, 182, 0.92)", "rgba(141, 216, 255, 0.92)");
   drawLineChart(bowlTrendChart, dashboardState.bowlHistory, chartLabels, "rgba(255, 202, 122, 0.96)", "rgba(255, 202, 122, 0.18)");
   drawBarChart(petActivityChart, dashboardState.petActivity, chartLabels, "rgba(141, 216, 255, 0.95)", "rgba(86, 208, 182, 0.95)");
-  drawComparisonChart(balanceChart, Math.min(100, dashboardState.mealsToday * 14), bowlLevel);
+  const dispensedGrams = Math.max(0, maxStorageGrams - currentStorageGrams);
+  
+  // Draw the chart using absolute gram values and the dynamic 100% capacity
+  drawComparisonChart(balanceChart, dispensedGrams, currentStorageGrams, maxStorageGrams);
 }
 
 function syncDashboard() {
@@ -305,37 +337,88 @@ function syncDashboard() {
 function recordSuccessfulFeed(portion) {
   dashboardState.mealsToday += 1;
   dashboardState.lastFeedingTime = timestamp();
-  dashboardState.feedingHistory.push(dashboardState.mealsToday);
-  dashboardState.petActivity.push(petPresent ? 1 : 0);
-  dashboardState.feedingHistory = dashboardState.feedingHistory.slice(-7);
-  dashboardState.petActivity = dashboardState.petActivity.slice(-7);
+  
+  // Find the index for "Today" (the last slot in the 7-day array)
+  const todayIndex = dashboardState.feedingHistory.length - 1;
+  
+  // Overwrite today's value instead of shifting the whole week
+  dashboardState.feedingHistory[todayIndex] = dashboardState.mealsToday;
+  
+  // If the pet is present, ensure today is marked as active
+  if (petPresent) {
+    dashboardState.petActivity[todayIndex] = 1;
+  }
+
+  // We use Math.max to ensure it never visually drops below 0g
+  currentStorageGrams = Math.max(0, currentStorageGrams - portion);
+  
+  // Push the new storage value to Firebase so the cloud knows the new weight
+  // (The ESP32 will overwrite this with the true physical weight on its next check-in!)
+  fetch(firebaseURL, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ storage_grams: currentStorageGrams })
+  });
+  
   updateBowl(bowlLevel + portion, true);
   addLog(`Feeding recorded. ${portion}% portion logged for the dashboard.`);
 }
 
-function loadStoredScheduleTime() {
-  const savedTime = localStorage.getItem(storedScheduleKey);
 
-  if (savedTime) {
-    feedTime.value = savedTime;
-    addLog(`Loaded saved schedule time ${savedTime}.`);
-  }
-}
-
-function initializeBowl(){
+function initializeCloudData() {
   fetch(firebaseURL)
   .then(response => {
-    if (!response.ok)
-      throw new Error("cloud database refused connection.");    
-    return response.text();
+    if (!response.ok) throw new Error("Cloud database refused connection.");    
+    return response.json(); 
   })
-  .then(level => {
-    const numericLevel = parseInt(level, 10);
-    updateBowl(Number.isNaN(numericLevel) ? 10 : numericLevel, true);
+  .then(data => {
+    // 1. Sync the Live Bowl Level
+    const numericLevel = data && data.bowl_level !== undefined ? parseInt(data.bowl_level, 10) : 10;
+    updateBowl(Number.isNaN(numericLevel) ? 10 : numericLevel, false);
+
+    // Sync the hardware-defined portion size
+    if (data && data.dispense_amount !== undefined) {
+      dispenseAmount = parseInt(data.dispense_amount, 10);
+    }
+
+    //storage grams logic
+    if (data && data.storage_grams !== undefined) {
+      const liveWeight = parseInt(data.storage_grams, 10);
+      
+      // The High-Water Mark Logic: If the new weight is higher than our current weight, 
+      // the user just added food! Set this new high value as the 100% baseline.
+      if (liveWeight > currentStorageGrams) {
+        maxStorageGrams = liveWeight;
+        addLog(`Hopper refilled! New capacity set to ${maxStorageGrams}g.`);
+      }
+      
+      currentStorageGrams = liveWeight;
+    }
+
+    // 2. Sync the Historical Analytics Charts (Chart 1 Data!)
+    if (data && data.scheduled_times && Array.isArray(data.scheduled_times)) {
+      scheduledTimes = data.scheduled_times;
+    } else {
+      scheduledTimes = []; // Start empty if nothing is in Firebase
+    }
+    renderScheduleList();
+    if (data && data.dashboard_state) {
+      dashboardState = {
+        ...defaultDashboardState,
+        ...data.dashboard_state
+      };
+      addLog("Historical analytics loaded from the cloud.");
+    } else {
+      dashboardState = { ...defaultDashboardState };
+    }
+
+    // 3. Render the UI with the fresh cloud data
+    setStatsFromState();
+    renderAnalytics();
   })
   .catch(error => {
     addLog(`[ERROR] ${error.message}`);
-    updateBowl(10, true); // Default bowl level
+    updateBowl(10, false); 
   }); 
 }
 
@@ -344,6 +427,20 @@ function updateBowl(level, recordHistory = false) {
   bowlPercent.textContent = `${bowlLevel}%`;
   bowlFill.style.width = `${bowlLevel}%`;
 
+  const safetyDot = document.getElementById("safetyDot");
+  if (safetyDot) {
+    // Strip old classes
+    safetyDot.className = "status-dot"; 
+    
+    // Apply colors based on safety status
+    if (bowlLevel >= 90) {
+      safetyDot.classList.add("danger"); // Make sure to add this to your CSS!
+    } else if (bowlLevel >= 60) {
+      safetyDot.classList.add("warn");   // Uses your existing yellow class
+    } else {
+      safetyDot.classList.add("on");     // Uses your existing green class
+    }
+  }
   if (bowlLevel >= 60) {
     bowlCaption.textContent = "Enough food available for the next scheduled feed.";
   } else if (bowlLevel >= 30) {
@@ -353,8 +450,12 @@ function updateBowl(level, recordHistory = false) {
   }
 
   if (recordHistory) {
-    dashboardState.bowlHistory.push(bowlLevel);
-    dashboardState.bowlHistory = dashboardState.bowlHistory.slice(-7);
+    // Find the index for "Today"
+    const todayIndex = dashboardState.bowlHistory.length - 1;
+    
+    // Update today's final bowl level instead of creating a new day
+    dashboardState.bowlHistory[todayIndex] = bowlLevel;
+    
     syncDashboard();
   } else {
     setStatsFromState();
@@ -375,15 +476,47 @@ function getScheduledTimeLabel() {
 }
 
 scheduleFeed.addEventListener("click", () => {
-  const scheduledTime = getScheduledTimeLabel();
-  if (!scheduledTime) {
+  const newTime = getScheduledTimeLabel();
+  if (!newTime) {
     return;
   }
 
-  localStorage.setItem(storedScheduleKey, scheduledTime);
-  systemStatus.textContent = `Scheduled for ${scheduledTime}`;
-  addLog(`Scheduled feeding time saved as ${scheduledTime}.`);
-  syncDashboard();
+  // Prevent adding the exact same time twice
+  if (scheduledTimes.includes(newTime)) {
+    addLog("This time is already on the schedule.");
+    return;
+  }
+
+  scheduleFeed.disabled = true;
+  scheduleFeed.style.opacity = "0.5";
+  systemStatus.textContent = "Saving schedule to cloud...";
+
+  const scheduledObj = { time: newTime, status: "SCHEDULED" };
+  const updatedSchedule = [...scheduledTimes, scheduledObj];
+
+  fetch(firebaseURL, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ scheduled_times: updatedSchedule })
+  })
+  .then(response => {
+    if (!response.ok) throw new Error("Failed to save schedule.");
+
+    // 3. Cloud confirmed!
+    scheduledTimes = updatedSchedule;
+    systemStatus.textContent = `Scheduled for ${newTime}`;
+    addLog(`Scheduled feeding time saved to cloud as ${newTime}.`);
+    renderScheduleList(); 
+    // Unlock the UI
+    scheduleFeed.disabled = false;
+    scheduleFeed.style.opacity = "1";
+  })
+  .catch(error => {
+    addLog(`[ERROR] ${error.message}`);
+    systemStatus.textContent = "Cloud Error";
+    scheduleFeed.disabled = false;
+    scheduleFeed.style.opacity = "1";
+  });
 });
 
 remoteFeed.addEventListener("click", () => {
@@ -395,33 +528,87 @@ remoteFeed.addEventListener("click", () => {
     return;
   }
 
+  addLog("Command sent. Waiting for hardware verification...");
+  systemStatus.textContent = "Dispensing...";
+  remoteFeed.disabled = true; // Prevent spam-clicking the button
+  remoteFeed.style.opacity = "0.5"
+
   fetch(firebaseURL, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ feed_command: 1 }) // 1 means "dispense now"
+    body: JSON.stringify({ feed_command: 1, feed_status: "PENDING" }) // 1 means "dispense now"
   })
   .then(response => {
     if (!response.ok) throw new Error("Failed to send command to cloud.");
-    const portion = petPresent ? 14 : 10;
-    addLog(`Command sent to cloud. Expecting ${portion}% portion dispense.`);
-    systemStatus.textContent = "Command Sent";
-    recordSuccessfulFeed(portion);
+    let attempts = 0;
+    const maxAttempts = 30; // Give the hardware (or yourself) 30 seconds to reply
+    
+    const receiptInterval = setInterval(() => {
+      attempts++;
+      
+      fetch(firebaseURL)
+      .then(res => res.json())
+      .then(data => {
+        // --- HANDSHAKE: SUCCESS ---
+        if (data.feed_status === "SUCCESS") {
+          clearInterval(receiptInterval);
+          const portion = dispenseAmount; // Use the defined dispense amount
+          systemStatus.textContent = statusCopy.safe;
+          recordSuccessfulFeed(portion); // ONLY update charts upon hardware success!
+          addLog("Hardware verified: Food successfully dispensed.");
+          resetHandshake();
+        } 
+        // --- HANDSHAKE: ERROR ---
+        else if (data.feed_status === "ERROR") {
+          clearInterval(receiptInterval);
+          systemStatus.textContent = "Hardware Error";
+          addLog("CRITICAL: Hardware reported a jam or empty hopper.");
+          resetHandshake();
+        } 
+        // --- HANDSHAKE: TIMEOUT ---
+        else if (attempts >= maxAttempts) {
+          clearInterval(receiptInterval);
+          systemStatus.textContent = "Hardware Timeout";
+          addLog("WARNING: Hardware did not respond in time.");
+          resetHandshake();
+        }
+      });
+    }, 1000); // Check once every 1 second
   })
   .catch(error => {
     addLog(`[ERROR] ${error.message}`);
     systemStatus.textContent = "Cloud Error";
+    resetHandshake();
   });
 });
 
-togglePresence.addEventListener("click", () => {
+function resetHandshake() {
+  remoteFeed.disabled = false;
+  remoteFeed.style.opacity = "1";
   fetch(firebaseURL, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ pet_present: petPresent }) 
+    // Reset back to idle state
+    body: JSON.stringify({ feed_status: "IDLE", feed_command: 0 })
+  });
+}
+
+togglePresence.addEventListener("click", () => {
+  togglePresence.disabled = true;
+  togglePresence.style.opacity = "0.5";
+  systemStatus.textContent = "Updating presence...";
+
+  const newState = !petPresent; // Calculate the new state
+
+  fetch(firebaseURL, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ pet_present: newState }) 
   })
   .then(response => {
     if (!response.ok)
       throw new Error("cloud database refused connection.");
+    petPresent = newState;
     if (petPresent) {
       addLog("Cloud simulated: Monitoring unit detected the pet.");
       systemStatus.textContent = statusCopy.ready;
@@ -431,15 +618,20 @@ togglePresence.addEventListener("click", () => {
     }
     
     // Log the activity to your charts
-    dashboardState.petActivity.push(petPresent ? 1 : 0);
-    dashboardState.petActivity = dashboardState.petActivity.slice(-7);
+    const todayIndex = dashboardState.petActivity.length - 1;
+    dashboardState.petActivity[todayIndex] = petPresent ? 1 : 0;
     syncDashboard();   
+    
+    // Unlock the UI
+    togglePresence.disabled = false;
+    togglePresence.style.opacity = "1";   
     })
     .catch(error => {
     addLog(`[ERROR] ${error.message}`);
     systemStatus.textContent = statusCopy.blocked;
     // Revert the variable if the cloud update failed
-    petPresent = !petPresent;
+    togglePresence.disabled = false;
+    togglePresence.style.opacity = "1";
   });
 });
 
@@ -447,41 +639,147 @@ function syncSystemStatus() {
   const feederDot = document.getElementById("feederDot");
   const monitorDot = document.getElementById("monitorDot");
 
-  // Hit the cloud root to see if the database is responsive
   fetch(firebaseURL)
   .then(response => {
     if (!response.ok) throw new Error("Database unresponsive");
     return response.json();
   })
   .then(data => {
-    // Turn on the green indicators
-   if (data && data.feeder_online === true) {
-      // 🟢 HARDWARE CONNECTED
-      if (feederDot) feederDot.classList.add("on");
-      if (monitorDot) monitorDot.classList.add("on");
-  } else {
-      // 🔴 HARDWARE OFFLINE (Even if Firebase is reachable)
-      if (feederDot) feederDot.classList.remove("on");
-      if (monitorDot) monitorDot.classList.remove("on");
+    // 1. Refresh local state from cloud
+    if (data && data.scheduled_times) {
+      scheduledTimes = data.scheduled_times;
     }
+    
+    // Update connection indicators
+    feederDot.className = "status-dot"; 
+    monitorDot.className = "status-dot"; 
+    
+    if (data && data.feeder_online === true) {
+      feederDot.classList.add("on");
+      monitorDot.classList.add("on");
+    } else {
+      feederDot.classList.add("danger");
+      monitorDot.classList.add("danger");
+    }
+
+    //Checking storage updates
+    if (data && data.storage_grams !== undefined) {
+      const liveWeight = parseInt(data.storage_grams, 10);
+      
+      // The High-Water Mark Logic: If the new weight is higher than our current weight, 
+      // the user just added food! Set this new high value as the 100% baseline.
+      if (liveWeight > currentStorageGrams) {
+        maxStorageGrams = liveWeight;
+        addLog(`Hopper refilled! New capacity set to ${maxStorageGrams}g.`);
+      }
+      
+      currentStorageGrams = liveWeight;
+    }
+
+
+    // Sync the hardware-defined portion size
+    if (data && data.dispense_amount !== undefined) {
+      dispenseAmount = parseInt(data.dispense_amount, 10);
+    }
+    
+    // 2. THE BACKGROUND HANDSHAKE: Detect completion
+    const completedFeed = scheduledTimes.find(s => s.status === "SUCCESS");
+
+    if (completedFeed) {
+      const portion = dispenseAmount; // Use the defined dispense amount
+  
+      // Update charts and log
+      recordSuccessfulFeed(portion);
+      addLog(`Background sync: Hardware finished the ${completedFeed.time} feed.`);
+  
+      scheduledTimes = scheduledTimes.filter(s => s.time !== completedFeed.time);
+  
+      // Push the updated array back to Firebase
+      fetch(firebaseURL, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ scheduled_times: scheduledTimes })
+      }).then(() => renderScheduleList());
+    } 
   })
   .catch(error => {
-    // 🔴 NO INTERNET / FIREBASE DOWN
-    if (feederDot) feederDot.classList.remove("on");
-    if (monitorDot) monitorDot.classList.remove("on");
+    feederDot.className = "status-dot danger"; 
+    monitorDot.className = "status-dot danger"; 
     console.log(`[STATUS CHECK ERROR] ${error.message}`);
   });
 }
-addLog("System online. Feeder unit and monitoring unit are connected.");
-addLog("Initial bowl check completed before dispensing.");
+
+function renderScheduleList() {
+  const scheduleList = document.getElementById("scheduleList");
+  if (!scheduleList) return;
+  scheduleList.innerHTML = ""; 
+  
+  // Sort times chronologically using object properties
+  scheduledTimes.sort((a, b) => a.time.localeCompare(b.time));
+
+  scheduledTimes.forEach((schedule, index) => {
+    const li = document.createElement("li");
+    li.innerHTML = `
+      <span>${schedule.time} <small>(${schedule.status})</small></span>
+      <button class="control-button" style="padding: 2px 8px; margin-left: 10px; border-color: #ff6b6b; color: #ff6b6b;" onclick="removeTime(${index})">X</button>
+    `;
+    scheduleList.appendChild(li);
+  });
+
+  // Target the '.time' property specifically to prevent [object Object] from showing
+  nextFeedStat.textContent = scheduledTimes.length > 0 ? scheduledTimes[0].time : "Not set";
+}
+
+// Global function to remove a time and instantly sync to Firebase
+window.removeTime = function(index) {
+  systemStatus.textContent = "Updating schedule...";
+  
+  // Remove the time from our local array
+  scheduledTimes.splice(index, 1); 
+  
+  // Push the newly updated array back to Firebase
+  fetch(firebaseURL, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ scheduled_times: scheduledTimes })
+  })
+  .then(() => {
+    systemStatus.textContent = "Schedule Updated";
+    renderScheduleList(); // Redraw the UI
+  });
+};
+
+//helper function to update the dispense amount in Firebase
+window.updateDispenseAmount = function(newGrams) {
+  const amount = parseInt(newGrams, 10);
+  if (isNaN(amount) || amount <= 0) {
+    addLog("Invalid portion size.");
+    return;
+  }
+
+  systemStatus.textContent = "Updating portion size...";
+
+  fetch(firebaseURL, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ dispense_amount: amount })
+  })
+  .then(response => {
+    if (!response.ok) throw new Error("Failed to update cloud.");
+    dispenseAmount = amount;
+    addLog(`Success: System will now dispense ${amount}g per meal.`);
+    systemStatus.textContent = "Portion Updated";
+  })
+  .catch(error => addLog(`[ERROR] ${error.message}`));
+};
+
+addLog("System online. Attempting cloud handshake...");
 dashboardState = loadDashboardState();
 updateBowl(bowlLevel, false);
-feedTime.value = localStorage.getItem(storedScheduleKey) || "6:30";
-loadStoredScheduleTime();
 setStatsFromState();
 renderAnalytics();
 window.addEventListener("resize", () => renderAnalytics());
 
 syncSystemStatus();
-initializeBowl();
+initializeCloudData();
 setInterval(syncSystemStatus, 30000); // Check system status every 30 seconds

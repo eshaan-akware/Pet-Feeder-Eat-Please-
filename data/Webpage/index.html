@@ -61,15 +61,15 @@
           <p class="panel-label">System status</p>
           <h3 id="systemStatus">Ready for feeding</h3>
           <div class="status-row">
-            <span class="status-dot on" id = "feederDot"></span>
-            <span>Feeder unit connected</span>
+            <span class="status-dot" id = "feederDot"></span>
+            <span>Feeder unit</span>
           </div>
           <div class="status-row">
-            <span class="status-dot on" id = "monitorDot"></span>
-            <span>Monitoring unit active</span>
+            <span class="status-dot" id = "monitorDot"></span>
+            <span>Monitoring unit</span>
           </div>
           <div class="status-row">
-            <span class="status-dot warn"></span>
+            <span class="status-dot" id = "safetyDot"></span>
             <span>Bowl level checked before action</span>
           </div>
         </div>
@@ -161,13 +161,20 @@
 
         <div class="controls-card reveal">
           <p class="panel-label">Control center</p>
-          <div class="time-field">
-            <label for="feedTime">Scheduled feed time</label>
-            <input id="feedTime" type="text" inputmode="numeric" placeholder="6:30" aria-describedby="feedTimeHelp" />
-            <p id="feedTimeHelp">Enter a time like 6:30 or 18:30.</p>
-          </div>
+            <div class="control-group">
+              <label>Scheduled feed times</label>
+              <p style="color: var(--muted); font-size: 0.9rem; margin-bottom: 1rem;">
+                Add multiple times (e.g., 6:30, 18:30) for automatic dispensing.
+              </p>
+  
+              <div style="display: flex; gap: 10px;">
+                <input type="time" id="feedTime" style="flex: 1; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); color: #fff; padding: 0.8rem; border-radius: 8px; font-size: 1.1rem; color-scheme: dark;" />
+                <button id="scheduleFeed" class="control-button" style="padding: 0 1.5rem; border-radius: 8px;">Schedule Time</button>
+              </div>
+
+              <ul id="scheduleList" class="schedule-list"></ul>
+            </div>
           <div class="button-stack">
-            <button type="button" class="control-button" id="scheduleFeed">Save scheduled time</button>
             <button type="button" class="control-button" id="remoteFeed">Remote feed from mobile</button>
             <button type="button" class="control-button ghost" id="togglePresence">Toggle pet presence</button>
           </div>

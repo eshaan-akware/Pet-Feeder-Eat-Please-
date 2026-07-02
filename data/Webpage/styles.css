@@ -336,6 +336,11 @@ main,
   box-shadow: 0 0 12px rgba(255, 202, 122, 0.45);
 }
 
+.status-dot.danger {
+  background: #ff6a6a;
+  box-shadow: 0 0 12px rgba(255, 106, 106, 0.45);
+}
+
 .signal ul {
   margin: 0.8rem 0 0;
   padding-left: 1.1rem;
@@ -640,6 +645,65 @@ main,
 
 .reveal:nth-of-type(5) {
   animation-delay: 420ms;
+}
+
+/* The unordered list container */
+.schedule-list {
+  list-style: none;
+  padding: 0;
+  margin: 1.5rem 0 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.8rem; /* Spacing between time blocks */
+}
+
+/* Individual time block */
+.schedule-list li {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: rgba(255, 255, 255, 0.04); /* Subtle frosted card look */
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  padding: 0.8rem 1.2rem;
+  transition: all 0.2s ease-in-out;
+}
+
+/* Add a subtle cyan glow when hovering over a saved time */
+.schedule-list li:hover {
+  background: rgba(255, 255, 255, 0.07);
+  border-color: rgba(86, 208, 182, 0.4); 
+}
+
+/* The Time Text */
+.schedule-list li span {
+  font-size: 1.2rem;
+  font-weight: 600;
+  color: #eef6fb;
+  letter-spacing: 1px;
+}
+
+/* The Delete Button (Overrides for a tight, sleek look) */
+.schedule-list li button {
+  background: rgba(255, 107, 107, 0.15); /* Translucent red */
+  color: #ff6b6b;
+  border: 1px solid rgba(255, 107, 107, 0.3);
+  border-radius: 6px;
+  cursor: pointer;
+  font-weight: bold;
+  transition: all 0.2s ease;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Turn it fully red on hover */
+.schedule-list li button:hover {
+  background: #ff6b6b;
+  color: #1a1f24; /* Dark text on bright background */
+  box-shadow: 0 0 10px rgba(255, 107, 107, 0.5);
 }
 
 @keyframes rise {

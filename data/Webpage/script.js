@@ -651,19 +651,36 @@ function syncSystemStatus() {
     if (data && data.scheduled_times) {
       scheduledTimes = data.scheduled_times;
     }
+
+    let isActuallyOnline = false;
+    if(data && data.heartbeat){
+      const currentUnixTime = Math.floor(Date.now()/1000);
+      if(currentUnixTime - data.heartbeat <= 45){
+        isActuallyOnline = true;
+      }
+    }
     
     // Update connection indicators
     feederDot.className = "status-dot"; 
     monitorDot.className = "status-dot"; 
     
-    if (data && data.feeder_online === true) {
+    if (isActuallyOnline) {
       feederDot.classList.add("on");
       monitorDot.classList.add("on");
+
+      if (data.feeder_online === false) {
+         fetch(firebaseURL, { method: 'PATCH', body: JSON.stringify({ feeder_online: true }) });
+      }
     } else {
       feederDot.classList.add("danger");
       monitorDot.classList.add("danger");
-    }
 
+    if (data.feeder_online === true) {
+         fetch(firebaseURL, { method: 'PATCH', body: JSON.stringify({ feeder_online: false }) });
+         addLog("CRITICAL: ESP32 heartbeat lost. System marked offline.");
+      }
+    }
+    
     // Sync the Live Bowl Level from the hardware
     if (data && data.bowl_level !== undefined) {
       const liveBowlLevel = parseInt(data.bowl_level, 10);
@@ -673,7 +690,7 @@ function syncSystemStatus() {
         updateBowl(liveBowlLevel, false);
       }
     }
-    
+
     //Checking storage updates
     if (data && data.storage_grams !== undefined) {
       const liveWeight = parseInt(data.storage_grams, 10);

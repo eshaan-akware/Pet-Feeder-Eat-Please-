@@ -4,6 +4,7 @@
 #include <addons/TokenHelper.h> // Provide the token generation process info.
 #include <addons/RTDBHelper.h>  // Provide the RTDB payload printing info and other helper functions.
 #include <time.h> // For time functions, if needed for timestamping
+#include <Ticker.h>
 
 // Provide the token generation process info.
 #include "addons/TokenHelper.h"
@@ -17,6 +18,11 @@ unsigned long lastFirebaseCheck = 0; // Timestamp for the last Firebase check
 String scheduledTime = ""; // Variable to hold the scheduled time from Firebase
 bool scheduleTriggeredToday = false; // Flag to ensure the schedule only triggers once per day
 unsigned long lastScheduleSync = 0; // Timestamp for the last schedule sync
+Ticker cloudFailSafe;
+const int storargecapacity = 2000;
+unsigned long lastCloudConnectionTime = 0; 
+bool cloudWasReady = true;
+
 
 // Your Firebase Database URL (Remove the https:// and trailing /)
 #define DATABASE_URL "pet-feeder-eat-please-default-rtdb.europe-west1.firebasedatabase.app"
@@ -28,15 +34,54 @@ FirebaseConfig config;
 
 // We need to declare the function from main.cpp so we can trigger it here
 extern void runremoteAction(); 
-extern void updateDisplay(const char* line1, const char* line2); // Declare the function to update the display
+extern void updateDisplay(String line1, String line2); // Declare the function to update the display
+
+void Reboot() {
+  Serial.println("[FAILSAFE] Rebooting due to Firebase connection failure...");
+  networkfailCount++;
+  ESP.restart();
+}
+
+void keepCloudAlive() {
+  if (!isOfflineMode) {
+    Firebase.ready(); // This processes the invisible network keep-alive!
+  }
+}
+
+void runStorageCheck() {
+  if (isOfflineMode || !Firebase.ready()) {
+    Serial.println("[STORAGE] Offline mode active. Skipping Cloud update.");
+    return; 
+  }
+
+  int percentage = checkCurrentBowlLevel();
+  if (percentage == -1) return; 
+
+  int storageGrams = (percentage * storargecapacity) / 100;
+
+  // 2. JUST PUSH THE UPDATE (No more 'getInt' double-dipping!)
+  if (Firebase.RTDB.setInt(&fbdo, "/feeder/storage_grams", storageGrams)) {
+    Serial.printf("[CLOUD] Storage level updated to: %d grams\n", storageGrams);      
+  } else {
+    // If the socket did drop during the motor movement, it will safely 
+    // catch it here, print the error, and recover naturally on the next loop!
+    Serial.printf("[FIREBASE ERROR] Failed to push storage: %s\n", fbdo.errorReason().c_str());
+  }
+
+  lastFirebaseCheck = millis(); 
+  lastScheduleSync = millis(); 
+}
 
 void RemoteCheckCommand(){
   if (Firebase.RTDB.getInt(&fbdo, "/feeder/feed_command")) {
       if (fbdo.intData() == 1) {
         Serial.println("[CLOUD] Remote Feed Triggered!");
+        Firebase.RTDB.setFloat(&fbdo, "/feeder/feed_command", 0.5);
+        Firebase.RTDB.setString(&fbdo, "/feeder/feed_status", "DISPENSING");
+        runremoteAction(); 
         Firebase.RTDB.setInt(&fbdo, "/feeder/feed_command", 0);
         Firebase.RTDB.setString(&fbdo, "/feeder/feed_status", "SUCCESS");
-        runremoteAction(); 
+        runStorageCheck(); // Update the storage level after dispensing
       }
     }
 }
@@ -49,51 +94,57 @@ void CheckTime() {
   strftime(timeStringBuff, sizeof(timeStringBuff), "%H:%M", &timeinfo);
   String currentTime = String(timeStringBuff);
 
-  // Strip the leading zero to match your website format
-  if (currentTime.charAt(0) == '0') {
-    currentTime = currentTime.substring(1);
-  }
-
-  // Poll Firebase every 10 seconds
-  static unsigned long lastScheduleSync = 5000; 
   static int currentIndex = 0; 
-
-  if (millis() - lastScheduleSync > 10000) {
-    lastScheduleSync = millis();
     
-    String timePath = "/feeder/scheduled_times/";
-    timePath += currentIndex;
-    timePath += "/time";
-    
-    String statusPath = "/feeder/scheduled_times/";
-    statusPath += currentIndex;
-    statusPath += "/status";
+  String timePath = "/feeder/scheduled_times/";
+  timePath += currentIndex;
+  timePath += "/time";
+  
+  String statusPath = "/feeder/scheduled_times/";
+  statusPath += currentIndex;
+  statusPath += "/status";
 
-    if (Firebase.RTDB.getString(&fbdo, timePath)) {
-      String scheduledTime = fbdo.stringData();
-      
-      // --- THE DEBUG PRINT ---
-      // This prints to your terminal every 10 seconds so you KNOW it's reading!
-      Serial.printf("[SCHEDULE] Round-Robin checked index %d. Found time: %s (Current ESP Time: %s)\n", currentIndex, scheduledTime.c_str(), currentTime.c_str());
-      
-      if (currentTime == scheduledTime && !scheduleTriggeredToday) {
-        if (Firebase.RTDB.getString(&fbdo, statusPath)) {
-          if (fbdo.stringData() == "SCHEDULED") {
-            Serial.printf("[SCHEDULE] Time matches %s! Dispensing...\n", scheduledTime.c_str());
-            Firebase.RTDB.setString(&fbdo, statusPath, "SUCCESS");
-            runremoteAction(); 
-            scheduleTriggeredToday = true; 
-          }
+  if (Firebase.RTDB.getString(&fbdo, timePath)) {
+    String scheduledTime = fbdo.stringData();
+    scheduledTime.trim(); // Cleans up any invisible spaces from the database
+    
+    Serial.printf("[SCHEDULE] Checked index %d. Found time: %s (Current ESP Time: %s)\n", currentIndex, scheduledTime.c_str(), currentTime.c_str());
+    
+    // --- THE BULLETPROOF TIME MATCHER ---
+    String normCurrent = currentTime;
+    String normScheduled = scheduledTime;
+    
+    // Strip leading zeros from BOTH times so they always match perfectly!
+    if (normCurrent.charAt(0) == '0') normCurrent = normCurrent.substring(1);
+    if (normScheduled.charAt(0) == '0') normScheduled = normScheduled.substring(1);
+    // ------------------------------------
+    
+    if (normCurrent == normScheduled && !scheduleTriggeredToday) {
+      if (Firebase.RTDB.getString(&fbdo, statusPath)) {
+        
+        String currentStatus = fbdo.stringData();
+        currentStatus.trim();
+        
+        if (currentStatus.equalsIgnoreCase("SCHEDULED")) { 
+          Serial.printf("[SCHEDULE] Time matches %s! Dispensing...\n", scheduledTime.c_str());
+          
+          Firebase.RTDB.setString(&fbdo, statusPath, "SUCCESS");
+          runremoteAction(); 
+          
+          scheduleTriggeredToday = true; 
+          runStorageCheck(); 
         }
       }
-      
-      currentIndex++; 
-      if (currentIndex >= 5) {
-        currentIndex = 0; 
-      }
-    } else {
-      currentIndex = 0; 
     }
+  } else {
+    // Softly logs the normal 404 error instead of pretending it's blank
+    Serial.printf("[SCHEDULE] Index %d check failed: %s\n", currentIndex, fbdo.errorReason().c_str());
+  }
+
+  // The Round-Robin safely advances
+  currentIndex++; 
+  if (currentIndex >= 5) {
+    currentIndex = 0; 
   }
 
   static String lastCheckedMinute = "";
@@ -105,46 +156,122 @@ void CheckTime() {
 
 void initSystemNetwork() {
   Serial.println("[WIFI] Connecting to network...");
+  unsigned long startAttemptTime = millis();
   WiFi.mode(WIFI_STA);
   WiFi.begin(ssid, password);
   
   while (WiFi.status() != WL_CONNECTED) {
     delay(500);
     Serial.print(".");
+
+    if (millis() - startAttemptTime > 10000) {
+      Serial.println("\n[WIFI] Connection timed out. Restarting...");
+      networkfailCount++;
+      ESP.restart();
+    }
   }
   Serial.printf("\n🎉 Wi-Fi Connected: %s\n", WiFi.localIP().toString().c_str());
 
   configTzTime("CET-1CEST,M3.5.0,M10.5.0/3", "pool.ntp.org", "time.nist.gov");
   struct tm timeinfo;
+  startAttemptTime = millis();
   while (!getLocalTime(&timeinfo, 5000)) {
     Serial.println("[TIME] Waiting for NTP sync...");
+    if (millis() - startAttemptTime > 10000) {
+      Serial.println("[TIME] NTP sync timed out. Restarting...");
+      networkfailCount++;
+      ESP.restart();
+    }
   }
   Serial.println("[TIME] Sync Complete!");
 
   Serial.println("[FIREBASE] Connecting to Cloud Database...");
+  cloudFailSafe.once(30, Reboot); // Set a one-time timer to reboot after 30 seconds if Firebase doesn't connect
   config.database_url = DATABASE_URL;
   config.signer.test_mode = true; 
 
+  WiFi.setSleep(WIFI_PS_NONE); // Disable Wi-Fi sleep to maintain a stable connection
+  config.timeout.socketConnection = 10000; // Set socket connection timeout to 10 seconds
+  config.timeout.serverResponse = 10000; // Set server response timeout to 10 seconds
+
   Firebase.begin(&config, &auth);
   Firebase.reconnectWiFi(true);
-  Firebase.RTDB.setBool(&fbdo, "/feeder/feeder_online", true);
-  
-  Serial.println("[FIREBASE] Connected and Ready!");
+  // --- THE SSL HANDSHAKE WAIT LOOP ---
+  Serial.print("[FIREBASE] Authenticating SSL");
+  unsigned long authTimer = millis();
+  while (!Firebase.ready() && millis() - authTimer < 8000) {
+    Serial.print(".");
+    delay(500);
+  }
+  Serial.println("");
+  // -----------------------------------
+
+  if (Firebase.ready()) {
+    Firebase.RTDB.setBool(&fbdo, "/feeder/feeder_online", true);
+  }  
+  bool cloudSuccess = Firebase.ready();
+  cloudFailSafe.detach(); 
+  if(cloudSuccess) {
+    Serial.println("[FIREBASE] Connected and Ready!");
+  } else {
+    Serial.println("[FIREBASE] Connection failed. Restarting...");
+    networkfailCount++;
+    ESP.restart();
+  }
+
+  lastFirebaseCheck = millis(); // Initialize the last check timestamp
+  lastScheduleSync = millis(); // Initialize the last schedule sync timestamp
+  lastCloudConnectionTime = millis();
 }
 
 void tickWebServer() {
-  // THE SAFETY NET
   if (Firebase.ready()) {
     
-    // 1. Fast Poll: Check the remote button every 2 seconds
-    if (millis() - lastFirebaseCheck > 2000) {
-      lastFirebaseCheck = millis();
-      RemoteCheckCommand();
+    if (!cloudWasReady) {
+      Serial.println("[FIREBASE] Tunnel Auto-Restored!");
+      cloudWasReady = true; 
     }
+    
+    lastCloudConnectionTime = millis(); 
+    unsigned long currentMillis = millis();
 
-    // 2. Schedule Poll: Our new Round-Robin checker
-    else if (millis() - lastScheduleSync > 10000) {
+    // 1. Fast Poll (Runs every 2 seconds)
+    if (currentMillis - lastFirebaseCheck > 2000) {
+      RemoteCheckCommand();
+      
+      lastFirebaseCheck = millis();
+      
+      // --- THE SMART BREATHER ---
+      // If the Schedule is about to fire, push it back so it waits 1 full second.
+      // This guarantees no rapid-fire collisions, without starving the timer!
+      if (millis() - lastScheduleSync > 9000) {
+        lastScheduleSync = millis() - 9000; 
+      }
+    }
+    // 2. Schedule Poll (Runs every 10 seconds)
+    else if (currentMillis - lastScheduleSync > 10000) {
       CheckTime();
+       
+      time_t now;
+      time(&now);
+      Firebase.RTDB.setInt(&fbdo, "/feeder/heartbeat", (int)now);
+      
+      lastScheduleSync = millis(); 
+      // Give the Fast Poll a full 2-second breather after a schedule check
+      lastFirebaseCheck = millis(); 
+    }
+    
+  } else {
+    // --- THE DEAD-MAN'S SWITCH ---
+    if (cloudWasReady) {
+      Serial.println("[FIREBASE WARNING] SSL Tunnel collapsed. Attempting auto-reconnect...");
+      cloudWasReady = false; 
+    }
+    
+    if (millis() - lastCloudConnectionTime > 15000) {
+      Serial.println("[FAILSAFE] Auto-reconnect failed. Switching to Offline Mode.");
+      updateDisplay("Cloud Error", "Offline Mode"); 
+      isOfflineMode = true; 
     }
   }
 }

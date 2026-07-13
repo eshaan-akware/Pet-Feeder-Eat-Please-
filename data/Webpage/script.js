@@ -117,8 +117,11 @@ function saveDashboardState() {
     lastFeedingTime: dashboardState.lastFeedingTime,
     feedingHistory: dashboardState.feedingHistory.slice(-7),
     bowlHistory: dashboardState.bowlHistory.slice(-7),
-    petActivity: dashboardState.petActivity.slice(-7)
+    petActivity: dashboardState.petActivity.slice(-7),
+    date: dashboardState.date
   };
+
+  localStorage.setItem(dashboardStateKey, JSON.stringify(payload));
 
   // Push the payload to Firebase seamlessly in the background
   fetch(firebaseURL, {
@@ -410,6 +413,7 @@ function initializeCloudData() {
         ...data.dashboard_state
       };
       addLog("Historical analytics loaded from the cloud.");
+      checkMidnightRollover();
     } else {
       dashboardState = { ...defaultDashboardState };
     }
@@ -638,6 +642,7 @@ togglePresence.addEventListener("click", () => {
 });
 
 function syncSystemStatus() {
+  checkMidnightRollover();
   const feederDot = document.getElementById("feederDot");
   const monitorDot = document.getElementById("monitorDot");
 
@@ -736,6 +741,31 @@ function syncSystemStatus() {
     monitorDot.className = "status-dot danger"; 
     console.log(`[STATUS CHECK ERROR] ${error.message}`);
   });
+}
+
+function checkMidnightRollover() {
+  const todayKey = new Date().toISOString().slice(0, 10);
+  
+  // Check if the dashboard state date is from yesterday or older
+  if (dashboardState.date && dashboardState.date !== todayKey) {
+    addLog("Midnight passed! Resetting daily stats and shifting charts...");
+    
+    // 1. Shift the 7-day arrays to the left (drop oldest day, append fresh slot)
+    dashboardState.feedingHistory = [...dashboardState.feedingHistory.slice(1), 0];
+    dashboardState.bowlHistory = [...dashboardState.bowlHistory.slice(1), bowlLevel];
+    dashboardState.petActivity = [...dashboardState.petActivity.slice(1), petPresent ? 1 : 0];
+    
+    // 2. Reset the daily counter & update the date
+    dashboardState.mealsToday = 0;
+    dashboardState.date = todayKey;
+    
+    // 3. Refresh the chart UI and save to cloud
+    chartLabels.length = 0;
+    chartLabels.push(...getDynamicChartLabels());
+    syncDashboard(); 
+  } else if (!dashboardState.date) {
+    dashboardState.date = todayKey; // Set initial date if missing
+  }
 }
 
 function renderScheduleList() {

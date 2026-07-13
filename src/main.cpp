@@ -4,6 +4,8 @@
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
 #include <HX711.h>
+#include <PN532.h>
+#include <PN532_I2C.h>
 #include "WebPageHandler.h" // Pull in your modular network/filesystem abstraction layer
 
 //Defining pins
@@ -19,70 +21,176 @@
 #define ECHO_PIN D3
 
 
+
 RTC_DATA_ATTR int networkfailCount = 0; // Persistent counter for network failures across deep sleep cycles
 bool isOfflineMode = false;
 const int BIN_EMPTY_CM = 20;
 const int BIN_FULL_CM = 4;
+bool isStandingBy = true; 
+bool petPresentState = false;
+volatile int isrTapCount = 0;
+volatile unsigned long lastIsrTapTime = 0;
 
 
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
+PN532_I2C pn532i2c(Wire);
+PN532 nfc(pn532i2c);
 Servo feederServo;
 HX711 scale;
 
 // --- OLED HELPER FUNCTION ---
 void updateDisplay(String line1, String line2) {
+  isStandingBy = false; // Pause idle animation while displaying text
   display.clearDisplay();
   display.setTextSize(1);
   display.setTextColor(SSD1306_WHITE);
-  
-  // Print first line
   display.setCursor(0, 10);
   display.println(line1);
-  
-  // Print second line
   display.setCursor(0, 30);
-  display.setTextSize(2); // Make the main status bigger
+  display.setTextSize(2); 
   display.println(line2);
-  
-  display.display(); // Push the drawing to the physical screen
+  display.display(); 
 }
 
-void testServo() {
-  Serial.println("Running Servo Hardware Test...");
+void IRAM_ATTR handleNuclearReset() {
+  unsigned long currentMillis = millis();
   
-  // Standard ESP32 hardware timer allocation
-  ESP32PWM::allocateTimer(0);
-  ESP32PWM::allocateTimer(1);
-  ESP32PWM::allocateTimer(2);
-  ESP32PWM::allocateTimer(3);
+  if(currentMillis - lastIsrTapTime < 50){
+    return;
+  }
+  // If more than 1 second passes between taps, reset the counter
+  if (currentMillis - lastIsrTapTime > 1000) {
+    isrTapCount = 0;
+  }
   
-  // Attach the servo with standard microsecond pulses (500us to 2400us)
-  feederServo.setPeriodHertz(50); 
-  feederServo.attach(SERVO_PIN, 500, 2400);
+  isrTapCount++;
+  lastIsrTapTime = currentMillis;
 
-  // Sweep Test
-  Serial.println("Moving to 0 degrees...");
-  feederServo.write(0);
-  delay(1000);
-
-  Serial.println("Moving to 90 degrees...");
-  feederServo.write(90);
-  delay(1000);
-
-  Serial.println("Moving to 180 degrees...");
-  feederServo.write(180);
-  delay(1000);
-
-  // Return to home position
-  Serial.println("Returning to 0 (Home)...");
-  feederServo.write(0);
-  delay(500);
-  
-  Serial.println("Servo Test Complete.");
+  // The Nuclear Trigger: 4 rapid taps completely bypasses the main loop
+  if (isrTapCount >= 4) {
+    ESP.restart(); 
+  }
 }
 
+// --- 1. THE UNIFIED ANIMATION FUNCTION (CAT IN A BOX) ---
+void updateAnimation(bool isDispensing) {
+  static unsigned long lastAnimUpdate = 0;
+  static int frame = 0;
+  // Bobbing speed: fast for dispensing, slow for sleeping
+  int delayTime = isDispensing ? 250 : 1000; 
 
+  if (millis() - lastAnimUpdate > delayTime) {
+    lastAnimUpdate = millis();
+    frame = !frame; // Toggle between 0 and 1
 
+    display.clearDisplay();
+    
+    // Box Dimensions (Centered at the bottom of the screen)
+    int boxX = 44;
+    int boxY = 32;
+    int boxW = 40;
+    int boxH = 18;
+
+    if (isDispensing) {
+      // --- STATE: CAT POPPED OUT ---
+      int bobbingY = frame ? 2 : 0; // Moves the cat up and down slightly
+      int headY = 24 + bobbingY;
+
+      // 1. Draw Ears
+      display.drawTriangle(50, headY-8, 54, headY-18, 58, headY-8, SSD1306_WHITE); // Left
+      display.drawTriangle(78, headY-8, 74, headY-18, 68, headY-8, SSD1306_WHITE); // Right
+      
+      // 2. Draw Head
+      display.drawCircle(64, headY, 15, SSD1306_WHITE);
+      
+      // 3. Draw Eyes & Cute 'w' Mouth
+      display.fillCircle(58, headY-2, 2, SSD1306_WHITE);
+      display.fillCircle(70, headY-2, 2, SSD1306_WHITE);
+      display.drawPixel(62, headY+2, SSD1306_WHITE);
+      display.drawPixel(63, headY+3, SSD1306_WHITE);
+      display.drawPixel(64, headY+2, SSD1306_WHITE);
+      display.drawPixel(65, headY+3, SSD1306_WHITE);
+      display.drawPixel(66, headY+2, SSD1306_WHITE);
+
+      // 4. MASKING: Erase the bottom half of the cat using a black rectangle!
+      display.fillRect(boxX, boxY, boxW, boxH, SSD1306_BLACK);
+
+      // 5. Draw the Box Front
+      display.drawRect(boxX, boxY, boxW, boxH, SSD1306_WHITE);
+
+      // 6. Draw Open Flaps (Angled out)
+      display.drawLine(boxX, boxY, boxX - 12, boxY + 8, SSD1306_WHITE);
+      display.drawLine(boxX + boxW, boxY, boxX + boxW + 12, boxY + 8, SSD1306_WHITE);
+
+      // 7. Draw Little Paws hanging over the edge
+      display.fillRoundRect(50, boxY - 2, 6, 8, 2, SSD1306_WHITE);
+      display.fillRoundRect(72, boxY - 2, 6, 8, 2, SSD1306_WHITE);
+
+      display.setTextSize(1);
+      display.setCursor(30, 54);
+      display.println("Dispensing!");
+
+    } else {
+      // --- STATE: HIDING IN BOX (STANDING BY) ---
+      
+      // 1. Draw the Box Front
+      display.drawRect(boxX, boxY, boxW, boxH, SSD1306_WHITE);
+      
+      // 2. Draw Closed Flaps (Angled inward to show it's shut)
+      display.drawLine(boxX, boxY, boxX + 18, boxY + 5, SSD1306_WHITE);
+      display.drawLine(boxX + boxW, boxY, boxX + boxW - 18, boxY + 5, SSD1306_WHITE);
+
+      // 3. Animate the 'Z's floating up
+      display.setTextSize(1);
+      if (frame) {
+        display.setCursor(54, 10); display.println("Z");
+        display.setCursor(64, 18); display.println("z");
+      } else {
+        display.setCursor(64, 10); display.println("Z");
+        display.setCursor(54, 18); display.println("z");
+      }
+
+      display.setCursor(18, 54);
+      display.println("Standing By...");
+    }
+    
+    display.display();
+  }
+}
+
+// --- 2. THE CHART FUNCTION ---
+void showCloudHistory() {
+  isStandingBy = false;
+  updateDisplay("Fetching Data...", "Please Wait");
+  
+  int meals = fetchMealsToday();
+  int grams = fetchStorageGrams();
+
+  if (meals == -1 || grams == -1) {
+    updateDisplay("Cloud Error", "Offline");
+    delay(2000);
+    isStandingBy = true;
+    return;
+  }
+
+  display.clearDisplay();
+  display.setTextSize(1);
+  display.setCursor(0, 0);
+  display.println("--- CLOUD STATS ---");
+  display.setCursor(0, 15);
+  display.printf("Meals Today: %d\n", meals);
+  display.setCursor(0, 30);
+  display.printf("Storage: %dg\n", grams);
+
+  // Dynamic Loading Bar
+  display.drawRect(0, 45, 128, 15, SSD1306_WHITE);
+  int fillWidth = map(grams, 0, 2000, 0, 128); 
+  display.fillRect(0, 45, fillWidth, 15, SSD1306_WHITE); 
+
+  display.display();
+  delay(4000); 
+  isStandingBy = true; 
+}
 
 void runremoteAction(){
 
@@ -104,6 +212,7 @@ void runremoteAction(){
   for (int pos = 5; pos <= 85; pos += 1) { 
     feederServo.write(pos);
     keepCloudAlive();
+    updateAnimation(true); // True = Dispensing Animation
     delay(40); 
   }
   
@@ -118,6 +227,7 @@ void runremoteAction(){
   for (int pos = 85; pos >= 5; pos -= 1) { 
     feederServo.write(pos);
     keepCloudAlive();
+    updateAnimation(false); // False = Sleeping Animation
     delay(40);
   }
   
@@ -127,52 +237,87 @@ void runremoteAction(){
   //return true; // Placeholder return value
 }
 
-void runtouchAction(){
-  // This variable remembers if the lid is currently open or closed
-  static bool isLidOpen = false; 
-  
+void runtouchAction() {
+  static bool isLidOpen = false;
+  static bool lastTouchState = LOW;
+  static unsigned long touchStartTime = 0;
+  static int tapCount = 0;
+  static unsigned long lastTapTime = 0;
+
   bool currentTouchState = digitalRead(TOUCH_PIN);
 
-  // 1. FINGER TOUCHED: Open the lid and keep it open
-  if (currentTouchState == HIGH && !isLidOpen) {
-    Serial.println("[OFFLINE] Touch Sensor held! Opening lid...");
-    updateDisplay("Manual Feed", "Dispensing..."); 
+  // 1. Fresh touch detected
+  if (currentTouchState == HIGH && lastTouchState == LOW) {
+    touchStartTime = millis();
+    lastTouchState = HIGH;
+  }
 
-    //int currentAngle = feederServo.read(); // Ask the ESP32 for the last known angle
-    /*if (currentAngle > 0) {
-      Serial.println("[FAILSAFE] Servo not at home. Easing to 0 slowly...");
-      for (int pos = currentAngle; pos >= 0; pos -= 1) {
+  // 2. Measure Active Holds
+  if (currentTouchState == HIGH) {
+    unsigned long holdTime = millis() - touchStartTime;
+
+    // --- ACTION A: TAP + HOLD (OFFLINE TOGGLE) ---
+    if (tapCount == 1 && holdTime > 1200 && !isLidOpen) {
+      Serial.println("[SYSTEM] Manual Offline Toggle Triggered!");
+      isOfflineMode = !isOfflineMode; 
+      updateDisplay("Network Override", isOfflineMode ? "OFFLINE" : "ONLINE");
+      delay(2000);
+      if (!isOfflineMode) ESP.restart(); 
+      tapCount = -1; // Lock until release
+      isStandingBy = true;
+    }
+    
+    // --- ACTION B: NORMAL HOLD (FEED) ---
+    else if (tapCount == 0 && holdTime > 350 && !isLidOpen) {
+      isStandingBy = false; 
+      Serial.println("[OFFLINE] Touch Sensor held! Opening lid...");
+      for (int pos = 5; pos <= 85; pos += 1) { 
         feederServo.write(pos);
+        keepCloudAlive();
+        updateAnimation(true); 
+        delay(40); 
+      }
+      isLidOpen = true; 
+    }
+  }
+
+  // 3. Detect a Release
+  if (currentTouchState == LOW && lastTouchState == HIGH) {
+    unsigned long touchDuration = millis() - touchStartTime;
+    lastTouchState = LOW;
+
+    // Detect a quick tap (just count it, don't execute yet!)
+    if (touchDuration > 10 && touchDuration < 350 && !isLidOpen && tapCount != -1) {
+      tapCount++;
+      lastTapTime = millis();
+    }
+
+    if (tapCount == -1) tapCount = 0; // Release the offline lock
+
+    // Close lid if it was open
+    if (isLidOpen) {
+      Serial.println("[OFFLINE] Touch Sensor released! Closing lid...");
+      for (int pos = 85; pos >= 5; pos -= 1) { 
+        feederServo.write(pos);
+        keepCloudAlive();
+        updateAnimation(false); 
         delay(40);
       }
-      delay(200); // Brief pause to let the power settle
-    }*/
-   // Serial.println(currentAngle + ": Current Angle b4 opening");
-    
-    // Slowly open (0 to 90)
-    for (int pos = 5; pos <= 85; pos += 1) { 
-      feederServo.write(pos);
-      keepCloudAlive();
-      delay(40); 
+      runStorageCheck(); 
+      isLidOpen = false; 
+      isStandingBy = true; 
     }
-    
-    isLidOpen = true; // Lock the state so it doesn't try to open again
   }
-  
-  // 2. FINGER REMOVED: Close the lid
-  else if (currentTouchState == LOW && isLidOpen) {
-    Serial.println("[OFFLINE] Touch Sensor released! Closing lid...");
+
+  // 4. THE ACTION PROCESSOR (Waits to see if more taps are coming!) 
+  // If 400ms have passed since the last tap, and the user isn't currently touching it:
+  if (tapCount > 0 && currentTouchState == LOW && (millis() - lastTapTime > 400)) {
     
-    // Slowly close (90 back to 0)
-    for (int pos = 85; pos >= 5; pos -= 1) { 
-      feederServo.write(pos);
-      keepCloudAlive();
-      delay(40);
+    if (tapCount == 2) {
+      showCloudHistory();
     }
     
-    runStorageCheck(); // Update the storage level after manual dispensing
-    updateDisplay("System Ready", "Standing By"); // Reset the screen
-    isLidOpen = false; // Reset the state lock
+    tapCount = 0; // Reset after evaluating
   }
 }
 
@@ -208,6 +353,54 @@ int checkCurrentBowlLevel() {
   return percentage; // Replace with actual load sensor reading logic between 1 - 100
 }
 
+// --- NFC PROXIMITY POLLING FUNCTION ---
+void checkNfcTag() {
+  static unsigned long lastNfcPoll = 0;
+  static unsigned long lastTimeTagSeen = 0; // Tracks when the tag was last in range
+  
+  // Only check the NFC module once every 1 second
+  if (millis() - lastNfcPoll > 1000) {
+    lastNfcPoll = millis();
+    
+    uint8_t success;
+    uint8_t uid[] = { 0, 0, 0, 0, 0, 0, 0 };  
+    uint8_t uidLength;                        
+    
+    // 1. Try to read a tag
+    success = nfc.readPassiveTargetID(PN532_MIFARE_ISO14443A, uid, &uidLength);
+    
+    if (success) {
+      // TAG IS IN RANGE! Reset the watchdog timer.
+      lastTimeTagSeen = millis(); 
+      
+      // If the pet was previously "Away", welcome them back!
+      if (!petPresentState) { 
+        Serial.println("[NFC] Tag entered field! Pet Arrived.");
+        petPresentState = true; 
+        pushPetPresence(petPresentState);
+        
+        isStandingBy = false; 
+        updateDisplay("Pet Detected", "Pet Arrived");
+        delay(2000); 
+        isStandingBy = true; 
+      }
+    } 
+    
+    // 2. THE WATCHDOG TIMEOUT 
+    // If the pet is currently marked as present, but we haven't seen the tag in 4 seconds...
+    if (petPresentState && (millis() - lastTimeTagSeen > 10000)) {
+      Serial.println("[NFC] Tag left field! Pet Left.");
+      petPresentState = false; 
+      pushPetPresence(petPresentState); // Update Firebase
+      
+      isStandingBy = false; 
+      updateDisplay("Pet Left", "Standing By...");
+      delay(2000); 
+      isStandingBy = true; 
+    }
+  }
+}
+
 void setup() {
   // Open the system diagnostic channel
   Serial.begin(115200);
@@ -216,6 +409,7 @@ void setup() {
   
   Serial.println("--- System Initialization Starting ---");
 
+  
   Serial.println("Initializing ultrasonic sensor");
   pinMode(TRIG_PIN, OUTPUT);
   pinMode(ECHO_PIN, INPUT);
@@ -230,12 +424,29 @@ void setup() {
   pinMode(TOUCH_PIN, INPUT); // Set the touch pin as input for offline dispensing
   Serial.println("Touch pin initialized for offline dispensing.");
 
+  attachInterrupt(digitalPinToInterrupt(TOUCH_PIN), handleNuclearReset, RISING); // Interrupt declare
+
   Wire.begin(D4, D5); 
   if(!display.begin(SSD1306_SWITCHCAPVCC, SCREEN_ADDRESS)) {
     Serial.println(F("OLED allocation failed! Check wiring."));
   } else {
     updateDisplay("Smart Feeder", "Booting...");
   }
+
+  Serial.println("Initializing NFC Module...");
+  nfc.begin();
+  
+  Wire.begin(D4, D5); // Initialize I2C for OLED and NFC
+  uint32_t versiondata = nfc.getFirmwareVersion();
+  if (!versiondata) {
+    Serial.println("[NFC] Didn't find PN532 board. Check wiring.");
+  } else {
+    Serial.printf("[NFC] Found PN532 with firmware version: %d.%d\n", (versiondata >> 16) & 0xFF, (versiondata >> 8) & 0xFF);
+    nfc.SAMConfig();
+
+    nfc.setPassiveActivationRetries(0x14); 
+  }
+
 
   // Standard ESP32 hardware timer allocation
   ESP32PWM::allocateTimer(0);
@@ -277,6 +488,7 @@ void setup() {
   }
   
   updateDisplay("System Ready", "Standing By");
+  updateAnimation(false); // False = Sleeping Animation
   Serial.println("--- System Initialization Finished ---");
 }
 
@@ -297,10 +509,15 @@ void loop() {
   }
   
   runtouchAction(); // Check for touch sensor input every loop iteration
+
+  checkNfcTag(); // Check for NFC tag input every loop iteration
   delay(10); // Small delay to yield clock cycles gracefully to ESP32 core background tasks
   //runremoteAction();
   //Serial.println("Remote action executed in loop.");
   //Serial.print("Current Servo Angle: " + String(feederServo.read()) + " degrees\n");
   // Small baseline delay to yield clock cycles gracefully to ESP32 core background tasks
+  if (isStandingBy) {
+    updateAnimation(false); // False = Sleeping Animation
+  }
   delay(2); 
 }

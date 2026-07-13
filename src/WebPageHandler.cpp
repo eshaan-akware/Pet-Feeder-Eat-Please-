@@ -48,6 +48,19 @@ void keepCloudAlive() {
   }
 }
 
+void pushPetPresence(bool Present){
+  if(isOfflineMode || !Firebase.ready()) return;
+  if (Firebase.RTDB.setBool(&fbdo, "/feeder/pet_present", Present)){
+    Serial.printf("[CLOUD] Pet presence updated to: %s\n", Present ? "true" : "false");
+  }
+  else {
+    Serial.printf("[FIREBASE ERROR] Failed to push pet presence: %s\n", fbdo.errorReason().c_str());
+  }
+
+  lastFirebaseCheck = millis();
+  lastScheduleSync = millis();
+}
+
 void runStorageCheck() {
   if (isOfflineMode || !Firebase.ready()) {
     Serial.println("[STORAGE] Offline mode active. Skipping Cloud update.");
@@ -70,6 +83,29 @@ void runStorageCheck() {
 
   lastFirebaseCheck = millis(); 
   lastScheduleSync = millis(); 
+}
+
+int fetchMealsToday() {
+  if (isOfflineMode || !Firebase.ready()) return -1;
+  int meals = -1;
+  if (Firebase.RTDB.getInt(&fbdo, "/feeder/dashboard_state/mealsToday")) {
+      meals = fbdo.intData();
+  }
+  // The Socket Breather: Push timers back to prevent an immediate collision!
+  lastFirebaseCheck = millis();
+  lastScheduleSync = millis();
+  return meals;
+}
+
+int fetchStorageGrams() {
+  if (isOfflineMode || !Firebase.ready()) return -1;
+  int grams = -1;
+  if (Firebase.RTDB.getInt(&fbdo, "/feeder/storage_grams")) {
+      grams = fbdo.intData();
+  }
+  lastFirebaseCheck = millis();
+  lastScheduleSync = millis();
+  return grams;
 }
 
 void RemoteCheckCommand(){

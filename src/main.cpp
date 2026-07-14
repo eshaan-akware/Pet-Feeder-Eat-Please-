@@ -6,7 +6,7 @@
 #include <HX711.h>
 #include <PN532.h>
 #include <PN532_I2C.h>
-#include "WebPageHandler.h" // Pull in your modular network/filesystem abstraction layer
+#include "WebPageHandler.h" 
 
 //Defining pins
 #define SERVO_PIN D2
@@ -40,7 +40,7 @@ HX711 scale;
 
 // --- OLED HELPER FUNCTION ---
 void updateDisplay(String line1, String line2) {
-  isStandingBy = false; // Pause idle animation while displaying text
+  isStandingBy = false; 
   display.clearDisplay();
   display.setTextSize(1);
   display.setTextColor(SSD1306_WHITE);
@@ -52,6 +52,7 @@ void updateDisplay(String line1, String line2) {
   display.display(); 
 }
 
+//Hardware Interrupt for helping a restart
 void IRAM_ATTR handleNuclearReset() {
   unsigned long currentMillis = millis();
   
@@ -76,7 +77,6 @@ void IRAM_ATTR handleNuclearReset() {
 void updateAnimation(bool isDispensing) {
   static unsigned long lastAnimUpdate = 0;
   static int frame = 0;
-  // Bobbing speed: fast for dispensing, slow for sleeping
   int delayTime = isDispensing ? 250 : 1000; 
 
   if (millis() - lastAnimUpdate > delayTime) {
@@ -96,14 +96,14 @@ void updateAnimation(bool isDispensing) {
       int bobbingY = frame ? 2 : 0; // Moves the cat up and down slightly
       int headY = 24 + bobbingY;
 
-      // 1. Draw Ears
+      //  Ears
       display.drawTriangle(50, headY-8, 54, headY-18, 58, headY-8, SSD1306_WHITE); // Left
       display.drawTriangle(78, headY-8, 74, headY-18, 68, headY-8, SSD1306_WHITE); // Right
       
-      // 2. Draw Head
+      // Head
       display.drawCircle(64, headY, 15, SSD1306_WHITE);
       
-      // 3. Draw Eyes & Cute 'w' Mouth
+      // Eyes & Cute 'w' Mouth
       display.fillCircle(58, headY-2, 2, SSD1306_WHITE);
       display.fillCircle(70, headY-2, 2, SSD1306_WHITE);
       display.drawPixel(62, headY+2, SSD1306_WHITE);
@@ -112,17 +112,17 @@ void updateAnimation(bool isDispensing) {
       display.drawPixel(65, headY+3, SSD1306_WHITE);
       display.drawPixel(66, headY+2, SSD1306_WHITE);
 
-      // 4. MASKING: Erase the bottom half of the cat using a black rectangle!
+      // MASKING with box
       display.fillRect(boxX, boxY, boxW, boxH, SSD1306_BLACK);
 
-      // 5. Draw the Box Front
+      // Box Front
       display.drawRect(boxX, boxY, boxW, boxH, SSD1306_WHITE);
 
-      // 6. Draw Open Flaps (Angled out)
+      // Open Flaps (Angled out)
       display.drawLine(boxX, boxY, boxX - 12, boxY + 8, SSD1306_WHITE);
       display.drawLine(boxX + boxW, boxY, boxX + boxW + 12, boxY + 8, SSD1306_WHITE);
 
-      // 7. Draw Little Paws hanging over the edge
+      // Little Paws hanging over the edge
       display.fillRoundRect(50, boxY - 2, 6, 8, 2, SSD1306_WHITE);
       display.fillRoundRect(72, boxY - 2, 6, 8, 2, SSD1306_WHITE);
 
@@ -131,16 +131,16 @@ void updateAnimation(bool isDispensing) {
       display.println("Dispensing!");
 
     } else {
-      // --- STATE: HIDING IN BOX (STANDING BY) ---
+      // Standing By
       
-      // 1. Draw the Box Front
+      // Box Front
       display.drawRect(boxX, boxY, boxW, boxH, SSD1306_WHITE);
       
-      // 2. Draw Closed Flaps (Angled inward to show it's shut)
+      // Closed Flaps 
       display.drawLine(boxX, boxY, boxX + 18, boxY + 5, SSD1306_WHITE);
       display.drawLine(boxX + boxW, boxY, boxX + boxW - 18, boxY + 5, SSD1306_WHITE);
 
-      // 3. Animate the 'Z's floating up
+      //'Z's floating up
       display.setTextSize(1);
       if (frame) {
         display.setCursor(54, 10); display.println("Z");
@@ -158,7 +158,7 @@ void updateAnimation(bool isDispensing) {
   }
 }
 
-// --- 2. THE CHART FUNCTION ---
+//THE CHART FUNCTION
 void showCloudHistory() {
   isStandingBy = false;
   updateDisplay("Fetching Data...", "Please Wait");
@@ -196,23 +196,12 @@ void runremoteAction(){
 
   updateDisplay("Remote Command", "Dispensing");
   Serial.println("Opening lid slowly (0 to 90)...");
-  
-  /*int currentAngle = feederServo.read(); // Ask the ESP32 for the last known angle
-    if (currentAngle > 0) {
-      Serial.println("[FAILSAFE] Servo not at home. Easing to 0 slowly...");
-      for (int pos = currentAngle; pos >= 0; pos -= 1) {
-        feederServo.write(pos);
-        delay(40);
-      }
-      delay(200); // Brief pause to let the power settle
-    }*/
 
   // Ultra-slow open to prevent power spikes
-  // Moving 1 degree every 40ms means a 90-degree sweep takes 3.6 seconds
   for (int pos = 5; pos <= 85; pos += 1) { 
     feederServo.write(pos);
     keepCloudAlive();
-    updateAnimation(true); // True = Dispensing Animation
+    updateAnimation(true); 
     delay(40); 
   }
   
@@ -233,8 +222,6 @@ void runremoteAction(){
   
   updateDisplay("System Ready", "Standing By"); // Reset screen when done
   Serial.println("Lid safely closed.");
-  //Remote action handler
-  //return true; // Placeholder return value
 }
 
 void runtouchAction() {
@@ -350,7 +337,7 @@ int checkCurrentBowlLevel() {
 
   Serial.printf("[ULTRASONIC] Distance: %d cm, Bowl Level: %d%%\n", distanceCm, percentage);
 
-  return percentage; // Replace with actual load sensor reading logic between 1 - 100
+  return percentage; 
 }
 
 // --- NFC PROXIMITY POLLING FUNCTION ---
@@ -399,6 +386,18 @@ void checkNfcTag() {
       isStandingBy = true; 
     }
   }
+}
+
+bool isBowlWeighted() {
+  // Use scale.get_units() if you want a cleaner number
+  // Threshold: Adjust this number based on your test!
+  long weightThreshold = 25000; 
+  
+  if (scale.is_ready()) {
+    long currentWeight = scale.read()*10000;
+    return (currentWeight > weightThreshold);
+  }
+  return false;
 }
 
 void setup() {
@@ -459,21 +458,9 @@ void setup() {
   feederServo.attach(SERVO_PIN, 500, 2400);
  
   Serial.println("Locking servo to home position (0)...");
-  //Serial.println("Current Servo Angle: " + String(feederServo.read()) + " degrees");
- /*signed int currentAngle = feederServo.read(); // Ask the ESP32 for the last known angle
-  Serial.println(currentAngle + ": Current Angle b4 locking to home");
-  if(currentAngle > -1) {
-    for (int pos = currentAngle; pos >= 0; pos -= 1) {
-      feederServo.write(pos);
-      delay(40);
-    }
-    Serial.println("Servo changed to angle:" + String(feederServo.read()) + " degrees");
-  }*/
-
   feederServo.write(5);
   delay(2000);
   
-  //testServo();
   if(networkfailCount >10){
     Serial.println("[FAILSAFE] Network failure count exceeded threshold. Entering offline mode.");
     isOfflineMode = true;
@@ -488,7 +475,7 @@ void setup() {
   }
   
   updateDisplay("System Ready", "Standing By");
-  updateAnimation(false); // False = Sleeping Animation
+  updateAnimation(false); 
   Serial.println("--- System Initialization Finished ---");
 }
 
@@ -507,17 +494,26 @@ void loop() {
     offlinemessageprinted = true;
     }
   }
+
+  if (scale.is_ready()) {
+    long reading = scale.read(); // Get raw value
+    Serial.printf("Current Raw Value: %ld\n", reading);
+  }
+  delay(50);
+
+  /*if (isBowlWeighted()) {
+  updateDisplay("Status", "Weight Detected");
+  } else {
+  updateDisplay("Status", "Empty");
+  }*/
+
+  delay(10);
   
   runtouchAction(); // Check for touch sensor input every loop iteration
 
   checkNfcTag(); // Check for NFC tag input every loop iteration
   delay(10); // Small delay to yield clock cycles gracefully to ESP32 core background tasks
-  //runremoteAction();
-  //Serial.println("Remote action executed in loop.");
-  //Serial.print("Current Servo Angle: " + String(feederServo.read()) + " degrees\n");
-  // Small baseline delay to yield clock cycles gracefully to ESP32 core background tasks
   if (isStandingBy) {
-    updateAnimation(false); // False = Sleeping Animation
-  }
+    updateAnimation(false); 
   delay(2); 
 }

@@ -1,17 +1,12 @@
-#include "WebPageHandler.h" // We are keeping the same header names so main.cpp doesn't break![cite: 6]
+#include "WebPageHandler.h" 
 #include <WiFi.h>
 #include <Firebase_ESP_Client.h>
-#include <addons/TokenHelper.h> // Provide the token generation process info.
-#include <addons/RTDBHelper.h>  // Provide the RTDB payload printing info and other helper functions.
-#include <time.h> // For time functions, if needed for timestamping
+#include <addons/TokenHelper.h> 
+#include <addons/RTDBHelper.h>  
+#include <time.h> 
 #include <Ticker.h>
 
-// Provide the token generation process info.
-#include "addons/TokenHelper.h"
-// Provide the RTDB payload printing info and other helper functions.
-#include "addons/RTDBHelper.h"
 
-// Your Wi-Fi Credentials[cite: 5]
 const char* ssid     = "motorola razr 40 ultra";
 const char* password = "123456789";
 unsigned long lastFirebaseCheck = 0; // Timestamp for the last Firebase check
@@ -24,7 +19,6 @@ unsigned long lastCloudConnectionTime = 0;
 bool cloudWasReady = true;
 
 
-// Your Firebase Database URL (Remove the https:// and trailing /)
 #define DATABASE_URL "pet-feeder-eat-please-default-rtdb.europe-west1.firebasedatabase.app"
 
 // Firebase Core Objects
@@ -44,7 +38,7 @@ void Reboot() {
 
 void keepCloudAlive() {
   if (!isOfflineMode) {
-    Firebase.ready(); // This processes the invisible network keep-alive!
+    Firebase.ready(); 
   }
 }
 
@@ -72,7 +66,7 @@ void runStorageCheck() {
 
   int storageGrams = (percentage * storargecapacity) / 100;
 
-  // 2. JUST PUSH THE UPDATE (No more 'getInt' double-dipping!)
+  // JUST PUSH THE UPDATE (No more 'getInt' double-dipping!)
   if (Firebase.RTDB.setInt(&fbdo, "/feeder/storage_grams", storageGrams)) {
     Serial.printf("[CLOUD] Storage level updated to: %d grams\n", storageGrams);      
   } else {
@@ -146,14 +140,12 @@ void CheckTime() {
     
     Serial.printf("[SCHEDULE] Checked index %d. Found time: %s (Current ESP Time: %s)\n", currentIndex, scheduledTime.c_str(), currentTime.c_str());
     
-    // --- THE BULLETPROOF TIME MATCHER ---
     String normCurrent = currentTime;
     String normScheduled = scheduledTime;
     
     // Strip leading zeros from BOTH times so they always match perfectly!
     if (normCurrent.charAt(0) == '0') normCurrent = normCurrent.substring(1);
     if (normScheduled.charAt(0) == '0') normScheduled = normScheduled.substring(1);
-    // ------------------------------------
     
     if (normCurrent == normScheduled && !scheduleTriggeredToday) {
       if (Firebase.RTDB.getString(&fbdo, statusPath)) {
@@ -173,11 +165,9 @@ void CheckTime() {
       }
     }
   } else {
-    // Softly logs the normal 404 error instead of pretending it's blank
     Serial.printf("[SCHEDULE] Index %d check failed: %s\n", currentIndex, fbdo.errorReason().c_str());
   }
 
-  // The Round-Robin safely advances
   currentIndex++; 
   if (currentIndex >= 5) {
     currentIndex = 0; 
@@ -240,7 +230,6 @@ void initSystemNetwork() {
     delay(500);
   }
   Serial.println("");
-  // -----------------------------------
 
   if (Firebase.ready()) {
     Firebase.RTDB.setBool(&fbdo, "/feeder/feeder_online", true);
@@ -277,7 +266,6 @@ void tickWebServer() {
       
       lastFirebaseCheck = millis();
       
-      // --- THE SMART BREATHER ---
       // If the Schedule is about to fire, push it back so it waits 1 full second.
       // This guarantees no rapid-fire collisions, without starving the timer!
       if (millis() - lastScheduleSync > 9000) {
@@ -298,7 +286,6 @@ void tickWebServer() {
     }
     
   } else {
-    // --- THE DEAD-MAN'S SWITCH ---
     if (cloudWasReady) {
       Serial.println("[FIREBASE WARNING] SSL Tunnel collapsed. Attempting auto-reconnect...");
       cloudWasReady = false; 
